@@ -1,0 +1,1004 @@
+---
+title: Chapter 5 Analysis Documentation
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: 
+  pdf_document:
+    fig_caption: yes
+    keep_tex: yes
+    latex_engine: xelatex
+    number_sections: yes
+geometry: margin=0.75in
+---
+
+```{r project-setup}
+setwd('C:/Users/meglarse/GitHub/larsen-dissertation/analyses/chpt4_LPS/')
+
+# Load packages
+require(vegan)
+require(ggplot2)
+require(reshape2)
+require(phylobase)
+require(ade4)
+require(ape)
+require(RColorBrewer)
+require(adephylo)
+require(pander)
+
+# Load source code
+source("./bin/CareStream-data-converter.R")
+```
+
+```{r global-opts}
+```
+
+# Project Summary
+
+**Overview**: For this experiment, *Synechococcus* sp WH7803 was reanimated from cyropreservation and transferred to a gradient of N:P ratios in a regression design with 5 replicates. After standardizing the concentration of each culture, membranes were harvested, run out on gels, and stained using ProQ 300 Emerald stain. Each banding profile was converted to xy coordinates to identify the intensity of each band and relativize each sample to the *E. coli* O55:B5 LPS standard (Sigma).
+
+
+**Collaborators**
+
+J.T. Lennon, *Indiana University, Bloomington, IN*
+
+**Citation**
+
+**Project questions**
+
+1. Does NL or PL alter LPS profiles on *Synechococcus* cell walls?
+  - Figure 1: LPS gel of strains with image of ancestor in NL and PL conditions
+
+2. How does resistance alter LPS profiles?
+3. Does NL or PL change the composition of bands on the cell membrane?
+4. How does resistance related to the infection profiles?
+5. What are the consequences for interactions with phage?
+6. Does phenotype result in cost?
+
+
+\newpage
+\tableofcontents
+\newpage
+
+
+# Data summary
+
+## Summary of major results
+
+\newpage
+
+```{r convert-data}
+## Read in all gel information
+gel.metadata = read.csv("./data/gel_metadata.csv", header = TRUE)
+unique(gel.metadata$gel.date)
+head(gel.metadata)
+str(gel.metadata)
+gel.metadata$gel.id = as.character(gel.metadata$gel.id)
+gel.metadata$lps.sample = as.character(gel.metadata$lps.sample)
+gel.metadata$lane = as.character(gel.metadata$lane)
+gel.metadata$batch = as.factor(gel.metadata$batch)
+
+## Read in lps sample list
+lps.list = read.csv("./data/lps_extracts.csv", header = TRUE)
+head(lps.list)
+str(lps.list)
+lps.list$strain = as.character(lps.list$strain)
+lps.list$strain.id = as.character(lps.list$strain.id)
+lps.list$lps.sample = as.character(lps.list$lps.sample)
+
+## Populate gel list with strain information
+gel.dat = merge(gel.metadata,lps.list, by = c("batch","lps.sample"))
+dim(gel.metadata);dim(lps.list);dim(gel.dat)
+
+write.csv(gel.dat, "./data/gelmetadata-complete.csv",row.names = FALSE)
+
+## Read in and convert profile data
+g1 = carestream.convert("2016-5-22_1_20150525-gel1_Data")
+g2 = carestream.convert("2016-5-22_1_20150525-gel2_Data")
+g3 = carestream.convert("2016-5-22_1_20150525-gel3_Data")
+g4 = carestream.convert("2016-5-22_1_20160413-gel1_Data")
+g5 = carestream.convert("2016-5-22_1_20160413-gel2_Data")
+g6 = carestream.convert("2016-5-22_1_20160413-gel3_Data")
+g7 = carestream.convert("2016-5-22_1_20160413-gel4_Data")
+g8 = carestream.convert("2016-5-22_1_20160420-gel1_Data")
+g9 = carestream.convert("2016-5-22_1_20160420-gel2_Data")
+g10 = carestream.convert("2016-5-22_1_20160420-gel3_Data")
+g11 = carestream.convert("2016-5-22_1_20160425-gel1_Data")
+g12 = carestream.convert("2016-5-22_1_20150114-gel1_Data")
+
+profile = rbind(g1,g2,g3,g4,g5,g6,g7,g8,g9,g10,g11,g12)
+
+
+# Convert data to appropriate structure
+str(profile)
+
+profile = as.data.frame(profile,stringsAsFactors = FALSE)
+profile$MW = as.numeric(profile$MW)
+profile$intensity = as.numeric(profile$intensity)
+profile$rel.int = as.numeric(profile$rel.int)
+profile$Band = as.numeric(profile$Band)
+
+#write.csv(profile, "./data/gelbands.csv",row.names = FALSE)
+
+## Keep all data
+#lps.dat = merge(gel.dat,profile, by = c("gel.id","lane"), all = TRUE)
+
+## Keep only strain data
+lps.dat = merge(gel.dat,profile, by = c("gel.id","lane"))
+MW = lps.dat[lps.dat$sample.type.x == "MW",]
+EcoliR= lps.dat[lps.dat$lps.sample == "EcoliR",]
+EcoliSm= lps.dat[lps.dat$lps.sample == "EcoliSm",]
+
+lps.dat = lps.dat[lps.dat$sample.type.x != "MW" & lps.dat$sample.type.x != "std",]
+
+```
+
+
+### List of selected strains for analysis
+```{r trim-data}
+## Subset selected strains from the total data set
+sel.strains = read.csv("./data/lps_selected.csv", header = TRUE)
+pander(sel.strains[,c(1,5,6,7,8,9)])
+
+sel.strains = sel.strains[,c(1,4,5)]
+lps.dat2 = lps.dat[,c(1,10,11,12,13,14,16,17,19)]
+
+lps.sel.dat.all = merge(sel.strains,lps.dat2, by = c("gel.id","strain.id"), all = TRUE)
+lps.sel.dat = merge(sel.strains,lps.dat2, by = c("gel.id","strain.id"))
+
+setdiff(lps.sel.dat.all$strain.id,lps.sel.dat$strain.id)
+
+lps.sel.dat$lim <- as.character(lps.sel.dat$lim)
+#unique((lps.sel.dat$strain.id))
+```
+
+```{r,results = 'hide', fig.height=3.75, fig.width=6, echo=FALSE, fig.cap="Treatment Chemostats"}
+avg <- read.csv("./data/cstat-means.csv", header = T)
+
+pdf(file = "./figures/chpt4_fig-TimeSeries.pdf", pointsize = 8, width = 5, height = 4)
+
+day.start <- -125
+day.end <- 170
+
+#par(mfrow = c(1,2))
+par(mar = c(5,6,3,1)+0.1)
+
+plot(avg$day,avg$NmeanSI,
+       xlim = c(day.start,day.end),ylim = c(1*10^4,10^9), log = "y", xaxt = 'n',yaxt = 'n',
+       xlab = "Time (d)", ylab = expression(paste("Abundance (mL"^"-1",")")), 
+     cex.lab = 1.25, font.lab = 1,        
+     lty = 1, lwd = 2, type = "l", col = "black", bg = "white", 
+       pch = 21, cex = 1)
+  
+  axis(1, cex.axis = 1.25,c(-120,-80,-40,0,40,80,120,160))
+  ticks <- seq(4, 9, by=1)
+  labels <- sapply(ticks, function(i) as.expression(bquote(10^ .(i))))
+  axis(2, cex.axis = 1.25, at = c(10^4,10^5, 10^6, 10^7, 10^8, 10^9), labels = labels, las = 1)
+  #abline(v = 0, col = "grey", lty = 2, lwd = 2)
+  
+## Add error bars to densities  
+#  arrows(avg$day,avg$NmeanSI-avg$NseSI,avg$day,avg$NmeanSI+avg$NseSI,code=0,lwd=2)
+#  arrows(avg$day,avg$PmeanSI-avg$PseSI,avg$day,avg$PmeanSI+avg$PseSI,code=0,lwd=2)
+
+## Add polygon and points to graph
+  
+  if(day.start < 0){
+    abline(v = 0, lwd = 2, lty = 1, col = "grey90")
+    polygon(c(0,0,180,180),c(10^3,10^10,10^10,10^3),
+     col = "grey90", border = NA)
+  }
+  
+  points(avg$day,avg$NmeanSI,
+         pch = 21, col = "steelblue",bg = "white",
+         type = 'l',lwd = 3,cex = 1, lty = 1)
+  points(avg$day,avg$PmeanSI,
+         pch = 21, col = "forestgreen",bg = "white",
+         type = 'l',lwd = 3,cex = 1, lty = 1)
+
+## Phage densities  
+#  points(avg$day,avg$NmeanP,
+#         pch = 21, col = "black",bg = "black",
+#         type = 'l',lwd = 1,cex = 1, lty = 1)
+
+# Add isolate time points
+
+iso.x = c(-125,-6,148,166)
+isoN.y = c(104271961.3 ,50668258.2,22354875.8,73452512.2 )
+isoP.y = c(84863414.33,38505264.08,23868855.67,68507860.57)
+
+#abline(v = iso.x, lwd = 1.5, lty = 1, col = "grey25") 
+points(iso.x, isoP.y, pch = 21, cex = 2.5, col = "black", bg = "black")
+points(iso.x, isoN.y, pch = 21, cex = 2.5, col = "black", bg = "grey75")
+
+#legend(c("Nlimited","P-limited","Strains"),col = c("steelblue","forestgreen"))
+
+box(lwd=1.5)
+
+dev.off()
+
+```
+
+```{r plot}
+lps.sel.dat$strain.id <- as.character(lps.sel.dat$strain.id)
+#lps.sel.dat <- lps.sel.dat[lps.sel.dat$MW > 14 & lps.sel.dat$MW < 82,]
+
+lps.sel.dat$lim <- as.factor(lps.sel.dat$lim)
+lps.sel.dat$tm.pt <- as.character(lps.sel.dat$tm.pt)
+
+p1 = ggplot(data = lps.sel.dat[lps.sel.dat$lim == "N" & lps.sel.dat$tm.pt == "1",], 
+            aes(strain.id, MW)) +
+  #scale_color_gradient2(low = "blue", high = "black", guide = FALSE) +
+  geom_point(pch = "-", size = 7) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 0, vjust = 0.5), 
+        panel.border= element_rect(linetype = 1, fill = NA),
+        axis.title = element_blank()) + ylim(10,65)
+
+p2 = ggplot(data = lps.sel.dat[lps.sel.dat$lim == "N" & lps.sel.dat$tm.pt == "19",], 
+            aes(strain.id, MW)) +
+  geom_point(pch = "-", size = 7) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 0, vjust = 0.5), 
+        panel.border= element_rect(linetype = 1, fill = NA),
+        axis.title = element_blank()) + ylim(10,65)
+
+p3 = ggplot(data = lps.sel.dat[lps.sel.dat$lim == "N" & lps.sel.dat$tm.pt == "21",], 
+            aes(strain.id, MW)) +
+  geom_point(pch = "-", size = 7) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 0, vjust = 0.5), 
+        panel.border= element_rect(linetype = 1, fill = NA),
+        axis.title = element_blank()) + ylim(10,65)
+
+p4 = ggplot(data = lps.sel.dat[lps.sel.dat$lim == "P" & lps.sel.dat$tm.pt == "1",], 
+            aes(strain.id, MW)) +
+  geom_point(pch = "-", size = 7) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 0, vjust = 0.5), 
+        panel.border= element_rect(linetype = 1, fill = NA),
+        axis.title = element_blank()) + ylim(10,65)
+
+p5 = ggplot(data = lps.sel.dat[lps.sel.dat$lim == "P" & lps.sel.dat$tm.pt == "19",], 
+            aes(strain.id, MW)) +
+  geom_point(pch = "-", size = 7) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 0, vjust = 0.5), 
+        panel.border= element_rect(linetype = 1, fill = NA),
+        axis.title = element_blank()) + ylim(10,65)
+
+p6 = ggplot(data = lps.sel.dat[lps.sel.dat$lim == "P" & lps.sel.dat$tm.pt == "21",], 
+            aes(strain.id, MW)) +
+  geom_point(pch = "-", size = 7) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 0, vjust = 0.5), 
+        panel.border= element_rect(linetype = 1, fill = NA),
+        axis.title = element_blank()) + ylim(10,65)
+  
+# Read in reference strain information
+ref <- as.matrix(read.delim("./data/2016-5-22_1_20150129_gel1_stdEval_Data.txt", sep = "\t", header = T))
+MW <- cbind(rep("MW",5),ref[2:6,2],rep("MW",5))
+Sm <- cbind(rep("Sm",21),ref[2:nrow(ref),5],rep("Standard",21))
+R <- cbind(rep("R",5),ref[2:6,8],rep("Standard",5))
+A <- cbind(rep("A",length(lps.sel.dat$MW[lps.sel.dat$strain.id == "101-7803-A"])),
+            lps.sel.dat$MW[lps.sel.dat$strain.id == "101-7803-A"],
+           rep("syn",length(lps.sel.dat$MW[lps.sel.dat$strain.id == "101-7803-A"])))
+AR <- cbind(rep("AR",length(lps.sel.dat$MW[lps.sel.dat$strain.id == "232-7803R8"])),
+            lps.sel.dat$MW[lps.sel.dat$strain.id == "232-7803R8"],
+            rep("syn",length(lps.sel.dat$MW[lps.sel.dat$strain.id == "232-7803R8"])))
+AR2 <- cbind(rep("AR2",length(lps.sel.dat$MW[lps.sel.dat$strain.id == "233-7803R8R21"])),
+            lps.sel.dat$MW[lps.sel.dat$strain.id == "233-7803R8R21"],
+            rep("syn",length(lps.sel.dat$MW[lps.sel.dat$strain.id == "233-7803R8R21"])))
+ref <- rbind(MW,Sm,R,A,AR,AR2)
+
+ref = as.data.frame(ref)
+colnames(ref) <- c("Reference","MW","Type")
+ref$MW <- as.numeric(as.character(ref$MW))
+ref$Reference <- as.character(ref$Reference)
+ref$Reference[ref$Reference == "A"] <- "101-7803-A"
+ref$Reference[ref$Reference == "AR"] <- "232-7803R8"
+ref$Reference[ref$Reference == "AR2"] <- "233-SR8R21"
+
+p7 = ggplot(data = ref, aes(Reference, MW, col = Type)) +
+  geom_point(pch = "-", size = 7) +
+  scale_color_brewer(palette = "Dark2", guide = FALSE) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 0, vjust = 0.5), 
+        panel.border= element_rect(linetype = 1, fill = NA),
+        axis.title.x = element_blank()) + 
+  ylab("Molecular Weight (kD)") + ylim(10,65)
+
+p7$data$Reference <- factor(p7$data$Reference, levels = c("MW","Sm","R","101-7803-A","232-7803R8","233-SR8R21"))
+
+#print(p7)
+
+require(gridExtra)
+pN = grid.arrange(p7,p1,p2,p3, nrow = 1, ncol = 4)
+pP = grid.arrange(p7,p4,p5,p6, nrow = 1, ncol = 4)
+
+#ggsave("./figures/chpt4_fig-bandprofilesN.pdf", plot = pN, dpi = 600, units = "in", width = 6, height = 2.5, scale = 2)
+#ggsave("./figures/chpt4_fig-bandprofilesP.pdf", plot = pP, dpi = 600, units = "in", width = 6, height = 2.5, scale = 2)
+
+# create matrix
+#lps.sel.dat$MW1 = as.factor(round(lps.sel.dat$MW, digits = 1))
+#lps.mat = acast(lps.sel.dat, strain.id ~ MW1, value.var = "rel.int")
+
+
+
+```
+
+
+```{r}
+
+## Plot reference and control strains together; then treatment strains
+
+
+p1 = ggplot(data = lps.sel.dat[lps.sel.dat$trt == "C" & lps.sel.dat$lim == "N",], 
+            aes(strain.id, MW)) +
+  scale_color_gradient2(low = "grey80", high = "black", guide = FALSE) +
+  geom_point(pch = "-", size = 7) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 0, vjust = 0.5), 
+        panel.border= element_rect(linetype = 1, fill = NA),
+        axis.title = element_blank()) + ylim(10,65)
+
+p2 = ggplot(data = lps.sel.dat[lps.sel.dat$trt == "T" & lps.sel.dat$lim == "N",], 
+            aes(strain.id, MW)) +
+  scale_color_gradient2(low = "grey80", high = "black", guide = FALSE) +
+  geom_point(pch = "-", size = 7) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 0, vjust = 0.5), 
+        panel.border= element_rect(linetype = 1, fill = NA),
+        axis.title = element_blank()) + ylim(10,65)
+
+p3 = ggplot(data = lps.sel.dat[lps.sel.dat$trt == "C" & lps.sel.dat$lim == "P",], 
+            aes(strain.id, MW)) +
+  scale_color_gradient2(low = "grey80", high = "black", guide = FALSE) +
+  geom_point(pch = "-", size = 7) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 0, vjust = 0.5), 
+        panel.border= element_rect(linetype = 1, fill = NA),
+        axis.title = element_blank()) + ylim(10,65)
+
+p4 = ggplot(data = lps.sel.dat[lps.sel.dat$trt == "T" & lps.sel.dat$lim == "P",], 
+            aes(strain.id, MW)) +
+  scale_color_gradient2(low = "grey80", high = "black", guide = FALSE) +
+  geom_point(pch = "-", size = 7) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 0, vjust = 0.5), 
+        panel.border= element_rect(linetype = 1, fill = NA),
+        axis.title = element_blank()) + ylim(10,65)
+
+grid.arrange(p1,p2,p3,p4, ncol = 2, nrow = 2)
+
+```
+
+\newpage
+
+```{r}
+bin.list2 <- c(); no.bands.list <- c(); strain.list <- c(); mean.rel.list <- c()
+
+low = 18.25 - 0.68
+high = 18.25 + 0.68
+
+for(i in unique(lps.sel.dat$strain)){
+  tmp <- lps.sel.dat[lps.sel.dat$strain == i,]
+  
+  
+  start = tmp$MW[which(tmp$Band == max(tmp$Band))]
+  
+  for(j in 1:30){
+    
+  }
+  
+  strain.list <- append(strain.list, rep(as.character(i),(length(bin.list)-1)))
+  
+}
+```
+
+```{r modality 1}
+ggplot(data = lps.sel.dat[lps.sel.dat$trt != "A",], aes(MW,rel.int, col = lim)) +
+  stat_smooth(level = 0.99)+
+  geom_point(pch = 20, size = 3) + xlim(20,60)+ ylim(0,0.4)+
+  facet_wrap(~ tm.pt, ncol = 1)+
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 0, vjust = 0.5), 
+        panel.border= element_rect(linetype = 1, fill = NA),
+        axis.title = element_blank())
+
+```
+
+## Strain summary
+```{r}
+# calculate average information
+#lps.sel.dat = lps.sel.dat[lps.sel.dat$MW > 14,]
+
+range.list = c(); band.list = c(); strain.list = c();lim.list = c(); tm.list<-c(); trt.list <- c(); min.list <- c(); max.list <- c(); cID.list <- c(); mean.list <- c(); mode.list <- c()
+
+#lps.sel.dat <- lps.sel.dat[lps.sel.dat$strain.id != "231-8101-A", ]
+
+for(i in unique(lps.sel.dat$strain.id)){
+  tmp = lps.sel.dat[lps.sel.dat$strain.id == i,]
+  no.bands = dim(tmp)[1]
+  range = max(tmp$MW)-min(tmp$MW)
+  min = min(tmp$MW)
+  max = max(tmp$MW)
+  
+  range.list = append(range.list, range)
+  mean.list = append(mean.list, mean(tmp$MW))
+  mode.list = append(mode.list, mode(tmp$MW))
+  band.list = append(band.list, no.bands)
+  strain.list = append(strain.list,as.character(i))
+  lim.list = append(lim.list, as.character(tmp[1,5]))
+  tm.list = append(tm.list, tmp[1,7])
+  trt.list = append(trt.list, as.character(tmp[1,4]))
+  min.list <- append(min.list, min)
+  max.list <- append(max.list, max)
+  cID.list <- append(cID.list, tmp[1,6])
+}
+
+
+avg.inf = data.frame(trt.list, lim.list,cID.list, tm.list,strain.list, band.list, range.list, min.list, max.list, mean.list, mode.list)
+#colnames(avg.inf) = c("Limitation","Strain","No. bands", "MW Range")
+
+write.csv(avg.inf,file = "./data/avgstraininfo.csv", row.names = FALSE)
+
+avg.inf2 <- avg.inf[avg.inf$strain.list != "232-7803R8" & avg.inf$strain.list != "233-7803R8R21" ,]
+table1 = acast(avg.inf2, lim.list ~ tm.list, mean, value.var = "band.list")
+
+p = ggplot(avg.inf2, aes(x=lim.list:tm.list, band.list, fill = lim.list, shape = tm.list)) +
+  geom_boxplot(alpha = 0.4)+
+  geom_point(size = 2, alpha = 0.7) +
+  scale_fill_brewer(guide = FALSE, palette = "Greys") +
+  theme_classic() +
+  xlab("Limitation") + ylab("Number of Bands per strain") +
+  theme(panel.border= element_rect(linetype = 1, fill = NA))
+print(p)
+#ggsave("./figures/chpt4_fig-NoBandsBoxplot.pdf", plot = p, width = 4, height = 4, units = "in", pointsize = 6)
+
+p2 = ggplot(avg.inf2, aes(x=lim.list:tm.list, range.list, fill = lim.list, shape = tm.list)) +
+  geom_boxplot(alpha = 0.4)+
+  geom_point(size = 2, alpha = 0.7) +
+  scale_fill_brewer(guide = FALSE, palette = "Greys") +
+  theme_classic() +
+  xlab("Limitation") + ylab("Molecular Weight range") +
+  theme(panel.border= element_rect(linetype = 1, fill = NA))
+print(p2)
+#ggsave("./figures/chpt4_fig-BandRangeBoxplot.pdf", plot = p2, width = 4, height = 4, units = "in", pointsize = 6)
+```
+
+```{r anova}
+avg.inf <- avg.inf[avg.inf$lim.list != "A",]
+str(avg.inf)
+avg.inf$tm.list <- as.numeric(as.character(avg.inf$tm.list))
+
+fit1 <- aov(band.list ~ tm.list * lim.list, data = avg.inf)
+summary(fit1)
+TukeyHSD(fit1)
+
+fit2 <- aov(range.list ~ tm.list * lim.list, data = avg.inf)
+summary(fit2)
+#TukeyHSD(fit2)
+
+
+```
+
+\newpage
+
+
+# Profile clustering
+In a previous study, we challenged host and phage strains in a time-shift experiment. Using the data pertaining to the selected strains in this study, we were able to compare how LPS profiles of *Synechococcus* strains are related to resistance to phage infection.
+
+## Summary of major results
+1. 
+
+\newpage
+
+```{r, eval = FALSE}
+data(RFLPdata)
+res <- RFLPdist(RFLPdata)
+plot(hclust(res[[1]]), main = "Euclidean distance")
+ 
+par(mfrow = c(1,2))
+plot(hclust(RFLPdist(RFLPdata, nrBands = 3)), cex = 0.7)
+RFLPplot(RFLPdata, nrBands = 3, mar.bottom = 6, cex.axis = 0.8)
+ 
+data(RFLPref)
+RFLPrefplot(RFLPdata, RFLPref, nrBands = 6, cex.axis = 0.8)
+ 
+```
+
+## Clustering Examples with RFLPtools
+
+RFLPtools is an analysis package for RFLP data that calculates presence/absence of bands for groups of samples with the same number. 
+
+```{r}
+require(RFLPtools)
+lps.mat.dat = lps.sel.dat[,c(2,8:10)]
+colnames(lps.mat.dat) = c("Sample","Bands","MW","rel.int")
+lps.mat.dat$Sample = as.character(lps.mat.dat$Sample)
+
+# RFLPtools only allows comparison of strains with the same number of bands
+par(mfrow = c(1,2))
+plot(hclust(RFLPdist(lps.mat.dat, nrBands = 6)), cex = 0.7) 
+RFLPplot(lps.mat.dat, nrBands = 6, mar.bottom = 6, cex.axis = 0.8)
+
+par(mfrow = c(1,2))
+plot(hclust(RFLPdist(lps.mat.dat, nrBands = 8)), cex = 0.7) 
+RFLPplot(lps.mat.dat, nrBands = 8, mar.bottom = 6, cex.axis = 0.8)
+
+par(mfrow = c(1,2))
+plot(hclust(RFLPdist(lps.mat.dat, nrBands = 10)), cex = 0.7) 
+RFLPplot(lps.mat.dat, nrBands = 10, mar.bottom = 6, cex.axis = 0.8)
+
+
+```
+
+## Clustering profiles
+
+```{r binning1}
+# Create band bins using 7803R8
+
+## read in data 
+dat = as.matrix(read.delim("./data/2016-5-22_1_20160413-gel2_Data.txt", header = T, sep = "\t"))
+dat <- dat[,26:28]
+colnames(dat) <- dat[1,]
+dat <- dat[-c(1,20:21),]
+class(dat) = "numeric"
+
+bin.list <- c()
+
+for(i in 1:c(nrow(dat))-1){
+  bin <- mean(c(dat[i,1], dat[i+1,1]))
+  bin.list <- append(bin.list, bin)
+}
+
+#bin.list
+
+## bin.list to categorize the number of bands and mean relative intensity within a bin for each strain
+
+bin.list2 <- c(); no.bands.list <- c(); strain.list <- c(); mean.rel.list <- c()
+
+lps.mat.dat <- na.omit(lps.mat.dat)
+
+for(i in unique(lps.mat.dat$Sample)){
+  tmp <- lps.mat.dat[lps.mat.dat$Sample == i,]
+  
+  for(j in 1:(length(bin.list)-1)){
+    no.bands <- length(tmp$MW[tmp$MW < bin.list[j] & tmp$MW > bin.list[j+1]])
+    mean.rel <- mean(tmp$rel.int[tmp$MW < bin.list[j] & tmp$MW > bin.list[j+1]])
+    no.bands.list <- append(no.bands.list, no.bands)
+    bin.list2 <- append(bin.list2, j)
+    mean.rel.list <- append(mean.rel.list, mean.rel)
+  }
+  
+  strain.list <- append(strain.list, rep(as.character(i),(length(bin.list)-1)))
+  
+}
+
+bins <- data.frame(strain.list, bin.list2, no.bands.list, mean.rel.list)
+
+## Replace NaN with 0
+bins$mean.rel.list[bins$mean.rel.list == "NaN"] <- 0
+
+#write.csv(bins, file = "./data/bins.csv", row.names = FALSE)
+
+## create matrix
+lps.mat <- acast(bins, strain.list ~ bin.list2,value.var = "mean.rel.list")
+
+## create rel abundance distance matrix
+lps.dist <- vegdist(decostand(lps.mat, method = "log"), method = "bray", na.rm = TRUE)
+
+
+## create PA matrix
+dataPA <- (lps.mat > 0)*1 
+samplePA.dist = vegdist(decostand(dataPA, method = "log"), method = "jaccard")
+
+```
+
+```{r modality2}
+
+bins <- read.csv("./data/bins.csv", header = T)
+bins <- bins[no.bands.list >0,]
+
+ggplot(data = bins[bins$lim != "A",], aes(bin, rel.int, col = lim)) +
+#  scale_color_brewer(palette = "Blues") +
+  geom_point(pch = 20, size = 2)+
+  facet_wrap(~ time, nrow = 3)+
+  stat_summary(fun.y = mean, geom = "line", size= 3)+
+
+
+```
+
+
+
+\newpage
+
+
+
+```{r clustering-figure}
+dev.off()
+
+# heirarchical clustering algorithm for distance matrix
+hc <- hclust(lps.dist, method = "complete")
+hcp <- as.phylo(hc)
+
+#Plot parameters
+par(mar=c(1,1,1,1) + 0.2)
+mypalette <- colorRampPalette(brewer.pal(9, "YlOrRd"))
+mypalette2 <- colorRampPalette(brewer.pal(9, "YlGnBu"))
+
+
+#nj.tree <- nj(lps.dist)
+
+# Define the Outgroup
+#outgroup <- match("231-8101-A", nj.tree$tip.label)
+
+# Create a Rooted Tree {ape}
+#nj.rooted <- root(nj.tree, outgroup, resolve.root = TRUE)
+#nj.rooted$edge.length <- nj.rooted$edge.length + min(nj.rooted$edge.length)
+#nj.rooted <- drop.tip(nj.rooted, "231-8101-A")
+
+# Plot the Rooted Tree{ape}
+#pdf(file="./figures/chpt4_fig-NJprofiletree.pdf",width = 3, height = 6, pointsize = 8)
+#par(mar = c(1,1,2,1) + 0.1)
+#plot.phylo(nj.rooted, main = "Neigbor Joining Tree", "phylogram", use.edge.length = FALSE,
+#direction = "right", cex = 0.6, label.offset = 1)
+#add.scale.bar(cex = 0.7)
+#dev.off()
+
+
+#par(mfrow = c(3,1))
+# Which is the most appropriate agglomeration method
+#plot(hclust(lps.dist, method = "complete"), hang = 0.1)
+#plot(hclust(lps.dist, method = "single"), hang = 0.1)
+#plot(hclust(lps.dist, method = "average"), hang = 0.1)
+
+#dev.off()
+
+# Save plot
+#pdf(file="./figures/chpt4_fig-ProfSimComplete.pdf",width = 4, height = 7, pointsize = 7)
+plot(as.phylo(hclust(lps.dist, method = "average")))
+#dev.off()
+```
+```{r anosim, eval = TRUE}
+rows = which(avg.inf$trt == "A")
+dat = avg.inf[-rows,]
+dat$strain.list <- as.character(dat$strain.list)
+dat$trt.list <- droplevels(dat$trt.list)
+dat$lim.list <- droplevels(dat$lim.list)
+#droplevels(dat$cID)
+
+bins = bins[bins$strain.list != "233-7803R8R21",]
+bins = bins[bins$strain.list != "101-7803-A",]
+bins = bins[bins$strain.list != "232-7803R8",]
+bins = bins[bins$strain.list != "231-8101-A",]
+
+lps.mat <- acast(bins, strain.list ~ bin.list2,value.var = "mean.rel.list")
+lps.dist <- vegdist(decostand(lps.mat, method = "log"), method = "bray", na.rm = TRUE)
+#lps.dist <- vegdist(lps.mat, method = "bray", na.rm = TRUE)
+
+lps.ano <- anosim(lps.dist, grouping = c(dat$lim.list), permutations = 999)
+summary(lps.ano)
+plot(lps.ano)
+```
+
+### Observations
+1. **Single** linkage, also known as nearest neighbor, is defined as the distance between the closest pair of objects.
+2. **Complete** linkage, also known as farthest neighber, calculates distance between the farthest pair.
+3. **Average** linkage considers the average of distances between all pairs.
+
+\newpage
+
+## Resistance
+```{r bor-dataFormatting}
+# Read in data file
+inf.mat <- as.matrix(read.csv("./data/bor.csv"))         
+
+# Rearrange data file for the appropriate analyses
+inf.mat <- t(inf.mat)
+inf.strains <- inf.mat[8:nrow(inf.mat),6]
+p.dat <- inf.mat[1:6,7:ncol(inf.mat)]
+inf.mat <- inf.mat[-c(1:7),-c(1:6)]
+rownames(inf.mat) <- inf.strains
+class(inf.mat) <- "numeric"
+
+# Subset the infection matrix for only the sequenced strains
+index2 <- which(rownames(inf.mat)  %in% unique(lps.sel.dat$strain))
+WH7803 <- inf.mat[rownames(inf.mat)=="WH7803",]
+inf.mat2 <- inf.mat[index2,]
+inf.mat2 <- rbind(inf.mat2,WH7803)
+inf.mat2 <- inf.mat2[-c(27,31),-c(95,96)]
+class(inf.mat2) = "numeric"
+```
+
+```{r resistance}
+# Function to calculate resistance
+infect.prop<-function(x){
+  x <- x[!is.na(x)] # remove NA's
+  length(x[x == 1])/length(x)
+	}
+
+inf.dat <- matrix(NA,nrow = length(inf.strains), ncol=4)
+
+# Calculate resistance
+#rownames(inf.dat) <- inf.strains
+inf.dat[,1] <- inf.strains
+inf.dat [,2] <- round(apply(inf.mat,1,infect.prop),digits = 2)
+inf.dat[1:85,3] <- round(apply(inf.mat[1:85,2:46],1,infect.prop),digits = 2)
+inf.dat[88:225,3] <- apply(inf.mat[88:nrow(inf.mat),47:96],1,infect.prop)
+inf.dat[1:85,4] <- apply(inf.mat[1:85,47:96],1,infect.prop)
+inf.dat[88:225,4] <- apply(inf.mat[88:nrow(inf.mat),2:46],1,infect.prop)
+names(inf.dat) <- c(NULL,NULL)
+
+#Subset calculated  matrix with the sequenced strain names
+#WH7803 <- inf.dat[inf.dat[,1]=="WH7803"]
+index <- which(inf.dat[,1]  %in% unique(lps.sel.dat$strain)) 
+inf.dat2 <- inf.dat[index,]
+#inf.dat2 = inf.dat2[-c(27,31),]   # remove 12P2S5, 21P2S4 due to lack of inf data
+#inf.dat2 <- rbind(WH7803,inf.dat2)
+rownames(inf.dat2) <- NULL
+colnames(inf.dat2) = c("strain","Average","Home","Away")
+#write.csv(inf.dat2,file = "./supporting-files/data/BOR.csv",row.names=FALSE)
+rownames(inf.dat2) <- inf.dat2[,1]
+inf.dat2 <- inf.dat2[,-1]
+class(inf.dat2)="numeric"
+
+```
+
+### Observations
+
+
+\newpage
+```{r clustering-figure1, eval = FALSE}
+# Need to change the row names to get them to match up
+
+inf.dat3 = merge(sel.strains,inf.dat2, by.x = "strain", by.y = 0)
+rownames(inf.dat2) = inf.dat2[,3]
+
+
+# heirarchical clustering algorithm for distance matrix
+hc <- hclust(lps.dist, method = "complete")
+hcp <- as.phylo(hc)
+
+#P lot parameters
+par(mar=c(1,1,1,1) + 0.2)
+mypalette <- colorRampPalette(brewer.pal(9, "YlOrRd"))
+mypalette2 <- colorRampPalette(brewer.pal(9, "YlGnBu"))
+
+
+# Save plot
+#pdf(file="./supporting-files/figures/fig-pub_traits-res.pdf",width = 3, height = 6)
+
+x <- phylo4d(x = hcp, inf.dat3)
+table.phylo4d(x, treetype = "phylo", symbol = "colors", show.node = TRUE, 
+              cex.label = 0.35, scale = FALSE, use.edge.length = TRUE,
+              edge.color = "black", edge.width = 1, box = FALSE, grid = TRUE,
+              col= mypalette2(25), 
+              # col = gray.colors(15, start = 0.3, end = 0.9, gamma = 2.2, alpha = NULL),
+              pch = 15, cex.symbol = 1.25,
+              ratio.tree = 0.25, cex.legend = 1.25, center = FALSE) 
+
+#dev.off()
+
+```
+
+
+```{r clustering-figure2, eval = FALSE}
+# Resistance + mutations
+pdf(file="./supporting-files/figures/fig-pub_traits2.pdf",width = 5, height = 6)
+
+x <- phylo4d(x = hcp, tree.dat2)
+table.phylo4d(x, treetype = "phylo", symbol = "colors", show.node = TRUE, 
+              cex.label = 0.35, scale = FALSE, use.edge.length = TRUE,
+              edge.color = "black", edge.width = 2, box = FALSE, grid = TRUE,
+              col= mypalette2(50), 
+              # col = gray.colors(15, start = 0.3, end = 0.9, gamma = 2.2, alpha = NULL),
+              pch = 15, cex.symbol = 1,
+              ratio.tree = 0.20, cex.legend = 1, center = FALSE) 
+
+dev.off()
+```
+
+\newpage
+
+### Observations
+
+\newpage
+
+```{r dist-stats, eval = FALSE}
+require(ade4)
+
+#check dimensions of matrices
+dim(breseq);dim(inf.mat2)
+setdiff(rownames(breseq),rownames(inf.mat2))
+setdiff(rownames(inf.mat2),rownames(breseq))
+
+rmv=c(22,28,31,33,34)
+breseq = breseq[-rmv,]
+#inf.mat2= inf.mat2[-32,]
+#inf.dat2 = inf.dat2[-32,]
+
+# Make a distance matrix for the mutational data
+breseq.dist <- vegdist(breseq, method="gower", na.rm = TRUE)
+inf.dist <- vegdist(inf.mat2, method="gower", na.rm = TRUE)
+
+# perform Mantel Test between two distance matrices
+man.test <- mantel.randtest(breseq.dist, inf.dist, nrepet = 999)
+
+plot(man.test)
+cols = c(2:8)
+dat <- tree.dat[-32,cols]
+dat[,4] = droplevels(dat[,4])
+adonis(breseq.dist ~ dat$Average*dat$lim*dat$trt, permutations = 999)
+adonis(inf.dist ~ dat$Average*dat$lim*dat$trt, permutations = 999)
+```
+
+
+# Profile Oridination
+## Summary of major results
+
+\newpage
+
+## Unweighted ordination
+```{r PA-ordination}
+
+# Principal Coordinates Analysis
+lps_pcoaPA <- cmdscale(samplePA.dist,k=3,eig=TRUE,add=FALSE) 
+
+# Percent Variance Explained Using PCoA (Axis 1,2,3)
+explainvar1 <- round(lps_pcoaPA$eig[1]/sum(lps_pcoaPA$eig)*100,1) 
+explainvar2 <- round(lps_pcoaPA$eig[2]/sum(lps_pcoaPA$eig)*100,1)
+explainvar3 <- round(lps_pcoaPA$eig[3]/sum(lps_pcoaPA$eig)*100,1)
+  
+pcoap <- merge(as.data.frame(lps_pcoaPA$points),lps.list,by.x=0, by.y = "strain.id")
+rownames(pcoap) <- rownames(lps_pcoaPA$points)
+#write.csv(file="../supporting_files/data/pcoap-UnweightedOrdination.csv",pcoap)
+
+#pdf(file = "../supporting_files/figures/pub-figure_chpt4-PCoA-UnweightedOrdination.pdf", width = 5, height = 5, pointsize = 10)
+
+# Plot Parameters
+par(mar=c(5,5,1,1))#, oma=c(3,1,1,1)+0.1 )
+x.dim <- c(min(pcoap$V1)-(max(pcoap$V1)*0.1),max(pcoap$V1)+(max(pcoap$V1)*0.1))
+y.dim <- c(min(pcoap$V2)-(max(pcoap$V2)*0.1),max(pcoap$V2)+(max(pcoap$V2)*0.1))
+
+# Initiate Plot
+plot(pcoap$V1, pcoap$V2, xlab=paste("PCoA Axis 1 (",explainvar1, "%)", sep="")
+    , ylab=paste("PCoA Axis 2 (",explainvar2, "%)", sep=""), 
+    xlim=x.dim, ylim=y.dim, pch=16, cex=2.0, type="n",xaxt="n",
+    yaxt="n", cex.lab=1.5, cex.axis=1.2)
+axis(side=1, las=1)   
+axis(side=2, las=1)    
+abline(h=0, lty="dotted")  
+abline(v=0, lty="dotted")
+box(lwd=2)
+
+# Make Plot Symbols in PCoA Reflect Treatment
+ 
+#mol.shape <- rep(NA, dim(pcoap)[1])
+#  for (i in 1:length(mol.shape)){
+#    if (pcoap$lim[i] == "N"){mol.shape[i] = 21}
+#    else {mol.shape[i] = 22}
+#	}
+
+#slope.color <- rep(NA, dim(pcoap)[1])
+#  for (i in 1:length(slope.color)){
+#    if (pcoap$lim[i] == "N") {slope.color[i] = "black"}
+#    else {slope.color[i] = "white"}  
+#	} 
+
+# Add Points & Ellipses
+points(pcoap$V1, pcoap$V2, pch = 20, cex = 2.5, 
+       bg = "black", col = "gray25")
+#points(pcoap$V1, pcoap$V2, pch = mol.shape, cex = (pcoap$time+1)*0.2, 
+#       bg = slope.color, col = "gray25")
+#text(pcoap$V1, pcoap$V2, labels = pcoap$time, pos = 3)  
+text(pcoap$V1, pcoap$V2, labels = pcoap$strain, pos = 1) 
+
+#dev.off()
+
+
+```
+
+
+\newpage
+
+## *********************Weighted ordination
+```{r CommPCoA, eval = TRUE}
+# Create distance matrix with band relative abundance
+#lps.dist <- vegdist(lps.mat, method = "bray", na.rm = TRUE)
+lps.dist <- vegdist(decostand(cstat.mat, method = "log"), method = "bray", na.rm = TRUE)
+
+# Principle Coordinates Analysis
+lps_pcoa <- cmdscale(lps.dist,k=3,eig=TRUE,add=FALSE)
+
+
+# Percent Variance Explained Using PCoA (Axis 1,2,3)
+explainvar1 <- round(lps_pcoa$eig[1]/sum(lps_pcoa$eig)*100,1) 
+explainvar2 <- round(lps_pcoa$eig[2]/sum(lps_pcoa$eig)*100,1)
+explainvar3 <- round(lps_pcoa$eig[3]/sum(lps_pcoa$eig)*100,1)
+  
+pcoap <- merge(as.data.frame(lps_pcoa$points),lps.list,by.x=0, by.y = "strain.id")
+rownames(pcoap) <- rownames(lps_pcoa$points)
+
+# save figure input data
+#write.csv(pcoap, "./supporting-files/data/chpt4_commPCoA.csv",row.names = FALSE)
+
+# Save figure
+#pdf(file = "./figures/chpt3_commPCoA.pdf", width = 5, height = 5, pointsize = 10)
+
+# Plot Parameters
+par(mar=c(5,5,2,1))#, oma=c(3,1,1,1)+0.1 )
+x.dim <- c(min(pcoap$V1)-(max(pcoap$V1)*0.1),max(pcoap$V1)+(max(pcoap$V1)*0.1))
+y.dim <- c(min(pcoap$V2)-(max(pcoap$V2)*0.1),max(pcoap$V2)+(max(pcoap$V2)*0.1))
+
+# Initiate Plot
+plot(pcoap$V1, pcoap$V2, xlab=paste("PCoA Axis 1 (",explainvar1, "%)", sep="")
+    , ylab=paste("PCoA Axis 2 (",explainvar2, "%)", sep=""), 
+    xlim=x.dim, ylim=y.dim, pch=16, cex=2.0, type="n",xaxt="n",
+    yaxt="n", cex.lab=1.5, cex.axis=1.2, bty='L')
+axis(side=1, las=1)   
+axis(side=2, las=1)    
+abline(h=0, lty="dotted",col = "grey50")  
+abline(v=0, lty="dotted",col = "grey50")
+box(lwd=2)
+
+
+# Add Points & Ellipses
+points(pcoap$V1[pcoap$lim == "N" & pcoap$trt == "C"], 
+       pcoap$V2[pcoap$lim == "N" & pcoap$trt == "C"], 
+       pch = 21, cex = 3.5, bg = "steelblue", col = "gray25")
+points(pcoap$V1[pcoap$lim == "N" & pcoap$trt == "T"], 
+       pcoap$V2[pcoap$lim == "N" & pcoap$trt == "T"], 
+       pch = 22, cex = 3.5, bg = "steelblue", col = "gray25")
+points(pcoap$V1[pcoap$lim == "P" & pcoap$trt == "C"], 
+       pcoap$V2[pcoap$lim == "P" & pcoap$trt == "C"], 
+       pch = 21, cex = 3.5, bg = "forestgreen", col = "gray25")
+points(pcoap$V1[pcoap$lim == "P" & pcoap$trt == "T"], 
+       pcoap$V2[pcoap$lim == "P" & pcoap$trt == "T"], 
+       pch = 22, cex = 3.5, bg = "forestgreen", col = "gray25")
+
+#text(pcoap$V1, pcoap$V2, labels = pcoap$strain, pos = 1) 
+
+legend("bottomleft",pch = c(19,15), c("N-limited","P-limited"),bty = 'n', col = c("steelblue","forestgreen"),cex = 1.25)
+
+#dev.off()
+```
+
+```{r PERMANOVA, eval = TRUE}
+rows = which(pcoap$trt == "A")
+dat = pcoap
+dat$Row.names <- as.character(dat$Row.names)
+#droplevels(dat$trt)
+
+bins = bins[bins$strain.list != "233-7803R8R21",]
+bins = bins[bins$strain.list != "101-7803-A",]
+bins = bins[bins$strain.list != "232-7803R8",]
+bins = bins[bins$strain.list != "231-8101-A",]
+
+lps.mat <- acast(bins, strain.list ~ bin.list2,value.var = "mean.rel.list")
+lps.dist <- vegdist(decostand(lps.mat, method = "log"), method = "bray", na.rm = TRUE)
+#lps.dist <- vegdist(lps.mat, method = "bray", na.rm = TRUE)
+
+fit <- adonis(lps.dist ~ lim*trt, strata = dat$cID, data = dat ,permutations = 999)
+
+
+dataPA <- (lps.mat > 0)*1 
+#samplePA.dist = vegdist(dataPA, method = "jaccard")
+samplePA.dist = vegdist(decostand(dataPA, method = "log"), method = "jaccard")
+
+adonis(samplePA.dist ~ lim*trt*tm.pt, strata = dat$cID, data = dat ,permutations = 999)
+
+```
+
+#### Observations
+
+
+
+\newpage
+
+
+
+# Additional information
+
+All analyses in this document were completed using `r sessionInfo()$R.version$version.string`. 
+
+Add list of packages and versions used for analyses
+Add list of citations for packages and/or other code chunks
